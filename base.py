@@ -1,18 +1,19 @@
 import openpyxl
 import os
 from datetime import datetime
+import requests
+from dotenv import load_dotenv
 
-# ─── Single Hardcoded User ───────────────────────────────────────────────────
+
 USER = {
     "name"   : "Ravi Kumar",
     "balance": 50000.0,
     "pin"    : "1234"
 }
 
-# ─── In-memory transaction log (current session) ────────────────────────────
 session_transactions = []
 
-# ─── File Paths ──────────────────────────────────────────────────────────────
+#  File Paths 
 HISTORY_FILE = r"C:\Users\Roshini\Desktop\JNTUH Hackathon\Insiders-Cloud-Hackathon\History\History.xlsx"
 SUMMARY_FILE = r"C:\Users\Roshini\Desktop\JNTUH Hackathon\Insiders-Cloud-Hackathon\History\Summary.xlsx"
 
@@ -23,34 +24,38 @@ CATEGORIES = [
 ]
 
 
-# ─── Excel Helpers ────────────────────────────────────────────────────────────
+#  Excels  
 
 def save_history_excel(all_txns):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Transactions"
     ws.append(["Date", "Time", "Merchant", "Category",
-               "Type", "Amount", "Net Debit", "Location"])
+               "Txn_Type", "Amount", "Net Debit", "Location"])
     for t in all_txns:
         ws.append([
-            t["date"], t["time"], t["merchant"], t["category"],
-            t["txn_type"], t["amount"], t["net_debit"], t["location"]
+            t.get("date"),
+            t.get("time"),
+            t.get("merchant"),
+            t.get("category"),
+            t.get("txn_type") or t.get("type"),
+            t.get("amount"),
+            t.get("net_debit") or t.get("net debit"),
+            t.get("location"),
         ])
     wb.save(HISTORY_FILE)
 
-
 def load_history_excel():
-    # file doesn't exist or is empty → return empty list
     if not os.path.exists(HISTORY_FILE):
         return []
     try:
         wb = openpyxl.load_workbook(HISTORY_FILE)
         ws = wb.active
         rows = list(ws.iter_rows(values_only=True))
-        # empty sheet or only has header → return empty list
         if len(rows) < 2:
             return []
-        headers = rows[0]
+        headers = [str(h).lower().replace(" ", "_") for h in rows[0]]
+
         txns = []
         for row in rows[1:]:
             txns.append(dict(zip(headers, row)))
@@ -132,7 +137,7 @@ def load_summary_excel():
         return None, None, None
 
 
-# ─── Other Helpers ────────────────────────────────────────────────────────────
+#  Other  
 
 def pick_from_list(prompt, options):
     print(f"\n{prompt}")
@@ -154,7 +159,7 @@ def verify_pin():
         raise PermissionError("Incorrect PIN.")
 
 
-# ─── Features ────────────────────────────────────────────────────────────────
+# Features 
 
 def check_balance():
     print("\n── Check Balance ──")
@@ -204,14 +209,14 @@ def make_transaction():
         if not merchant:
             raise ValueError("Merchant name cannot be empty.")
 
-        # ── Geolocation placeholder ──────────────────────────────────────────
-        # TODO: Replace with a real API call when you have the key.
-        # Example:
-        #   import requests
-        #   res  = requests.get("https://ipinfo.io/json?token=YOUR_API_KEY")
-        #   data = res.json()
-        #   location = f"{data.get('city')}, {data.get('region')}, {data.get('country')}"
-        location = "Location: [Connect Geolocation API here]"
+        load_dotenv()
+        try:
+            token = os.getenv("IPINFO_TOKEN")
+            res = requests.get(f"https://ipinfo.io/json?token={token}", timeout=5)
+            data = res.json()
+            location = f"{data.get('city')}, {data.get('region')}, {data.get('country')}"
+        except Exception:
+            location = "Unknown"
 
         timestamp = datetime.now()
         date_str  = timestamp.strftime("%Y-%m-%d")
@@ -292,7 +297,7 @@ def view_averages():
             print(f"  {info['merchant']:<22}Rs.{info['avg_amount']:>9.2f}{info['count']:>12}")
 
 
-# ─── Save to Files on Exit ───────────────────────────────────────────────────
+#  Save to Files on Exit 
 
 def save_on_exit():
     if not session_transactions:
@@ -319,7 +324,12 @@ def save_on_exit():
     total_amount = sum(float(t["amount"]) for t in all_txns)
     avg_amount   = round(total_amount / total_txns, 2)
 
-    dates     = [datetime.strptime(str(t["date"]), "%Y-%m-%d") for t in all_txns]
+    def parse_date(val):
+        if isinstance(val, datetime):
+            return val
+        return datetime.strptime(str(val), "%Y-%m-%d")
+
+    dates     = [parse_date(t["date"]) for t in all_txns]
     earliest  = min(dates)
     latest    = max(dates)
     day_span  = max((latest - earliest).days + 1, 1)
@@ -357,7 +367,7 @@ def save_on_exit():
     print(f"  -> {SUMMARY_FILE}")
 
 
-# ─── Main Menu ────────────────────────────────────────────────────────────────
+#  Main Menu 
 
 def menu():
     print("\n" + "=" * 40)
