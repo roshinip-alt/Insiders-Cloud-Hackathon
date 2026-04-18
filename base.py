@@ -12,8 +12,17 @@ USER = {
 }
 
 session_transactions = []
+SESSION_START = datetime.now()
 
-#  File Paths 
+
+def format_duration(seconds):
+    """Converts seconds into HH:MM:SS string."""
+    hours, remainder = divmod(int(seconds), 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+#  File Paths
 HISTORY_FILE = r"C:\Users\Roshini\Desktop\JNTUH Hackathon\Insiders-Cloud-Hackathon\History\History.xlsx"
 SUMMARY_FILE = r"C:\Users\Roshini\Desktop\JNTUH Hackathon\Insiders-Cloud-Hackathon\History\Summary.xlsx"
 
@@ -24,14 +33,14 @@ CATEGORIES = [
 ]
 
 
-#  Excels  
+#  Excels
 
 def save_history_excel(all_txns):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Transactions"
     ws.append(["Date", "Time", "Merchant", "Category",
-               "Txn_Type", "Amount", "Net Debit", "Location"])
+               "Txn_Type", "Amount", "Net Debit", "Location", "Time per Transaction"])
     for t in all_txns:
         ws.append([
             t.get("date"),
@@ -42,8 +51,10 @@ def save_history_excel(all_txns):
             t.get("amount"),
             t.get("net_debit") or t.get("net debit"),
             t.get("location"),
+            t.get("time_per_txn", ""),
         ])
     wb.save(HISTORY_FILE)
+
 
 def load_history_excel():
     if not os.path.exists(HISTORY_FILE):
@@ -55,11 +66,7 @@ def load_history_excel():
         if len(rows) < 2:
             return []
         headers = [str(h).lower().replace(" ", "_") for h in rows[0]]
-
-        txns = []
-        for row in rows[1:]:
-            txns.append(dict(zip(headers, row)))
-        return txns
+        return [dict(zip(headers, row)) for row in rows[1:]]
     except Exception:
         return []
 
@@ -67,20 +74,17 @@ def load_history_excel():
 def save_summary_excel(last_txn, stats, merchant_averages):
     wb = openpyxl.Workbook()
 
-    # Sheet 1 - Last Transaction
     ws1 = wb.active
     ws1.title = "Last Transaction"
     ws1.append(["Field", "Value"])
     for key, val in last_txn.items():
         ws1.append([key, val])
 
-    # Sheet 2 - Stats
     ws2 = wb.create_sheet("Stats")
     ws2.append(["Metric", "Value"])
     for key, val in stats.items():
         ws2.append([key, val])
 
-    # Sheet 3 - Merchant Averages
     ws3 = wb.create_sheet("Merchant Averages")
     ws3.append(["Merchant", "Avg Amount", "Txn Count"])
     for m, info in merchant_averages.items():
@@ -90,32 +94,26 @@ def save_summary_excel(last_txn, stats, merchant_averages):
 
 
 def load_summary_excel():
-    """Returns (last_txn dict, stats dict, merchant_averages dict).
-       Returns (None, None, None) if file missing, empty, or sheets not set up yet."""
     if not os.path.exists(SUMMARY_FILE):
         return None, None, None
     try:
         wb = openpyxl.load_workbook(SUMMARY_FILE)
 
-        # sheets don't exist yet (file is blank/new)
         if "Last Transaction" not in wb.sheetnames or "Stats" not in wb.sheetnames:
             return None, None, None
 
-        # Sheet 1 - Last Transaction
-        ws1      = wb["Last Transaction"]
+        ws1 = wb["Last Transaction"]
         last_txn = {}
         for row in list(ws1.iter_rows(values_only=True))[1:]:
             if row[0] is not None:
                 last_txn[row[0]] = row[1]
 
-        # Sheet 2 - Stats
-        ws2   = wb["Stats"]
+        ws2 = wb["Stats"]
         stats = {}
         for row in list(ws2.iter_rows(values_only=True))[1:]:
             if row[0] is not None:
                 stats[row[0]] = row[1]
 
-        # Sheet 3 - Merchant Averages (optional sheet)
         merchant_averages = {}
         if "Merchant Averages" in wb.sheetnames:
             ws3 = wb["Merchant Averages"]
@@ -127,7 +125,6 @@ def load_summary_excel():
                         "count"     : row[2],
                     }
 
-        # if sheets exist but have no data yet
         if not last_txn or not stats:
             return None, None, None
 
@@ -137,7 +134,7 @@ def load_summary_excel():
         return None, None, None
 
 
-#  Other  
+#  Other
 
 def pick_from_list(prompt, options):
     print(f"\n{prompt}")
@@ -159,7 +156,7 @@ def verify_pin():
         raise PermissionError("Incorrect PIN.")
 
 
-# Features 
+# Features
 
 def check_balance():
     print("\n── Check Balance ──")
@@ -178,11 +175,9 @@ def deposit():
         amount = float(input("Enter deposit amount (Rs.): "))
         if amount <= 0:
             raise ValueError("Amount must be greater than zero.")
-
         USER["balance"] = round(USER["balance"] + amount, 2)
         print(f"\n  Rs.{amount:,.2f} deposited successfully.")
         print(f"  New Balance: Rs.{USER['balance']:,.2f}")
-
     except PermissionError as pe:
         print("Access Denied:", pe)
     except ValueError as ve:
@@ -193,6 +188,8 @@ def deposit():
 
 def make_transaction():
     print("\n── Make Transaction ──")
+    txn_start = datetime.now()   #stater
+    #calculating the session time(subtracting the trandone-traninit)
     try:
         verify_pin()
 
@@ -218,7 +215,10 @@ def make_transaction():
         except Exception:
             location = "Unknown"
 
-        timestamp = datetime.now()
+        txn_end  = datetime.now()   #stopper
+        duration = (txn_end - txn_start).total_seconds()
+
+        timestamp = txn_end
         date_str  = timestamp.strftime("%Y-%m-%d")
         time_str  = timestamp.strftime("%H:%M:%S")
 
@@ -226,14 +226,15 @@ def make_transaction():
         USER["balance"] = round(USER["balance"] - net_debit, 2)
 
         txn = {
-            "date"     : date_str,
-            "time"     : time_str,
-            "merchant" : merchant,
-            "category" : category,
-            "txn_type" : txn_type,
-            "amount"   : amount,
-            "net_debit": net_debit,
-            "location" : location,
+            "date"        : date_str,
+            "time"        : time_str,
+            "merchant"    : merchant,
+            "category"    : category,
+            "txn_type"    : txn_type,
+            "amount"      : amount,
+            "net_debit"   : net_debit,
+            "location"    : location,
+            "time_per_txn": format_duration(duration),  # HH:MM:SS taken for this transaction
         }
         session_transactions.append(txn)
 
@@ -297,19 +298,17 @@ def view_averages():
             print(f"  {info['merchant']:<22}Rs.{info['avg_amount']:>9.2f}{info['count']:>12}")
 
 
-#  Save to Files on Exit 
+#  Save to Files on Exit
 
 def save_on_exit():
     if not session_transactions:
         print("\n  No new transactions to save.")
         return
 
-    # load existing history + append new session transactions
     all_txns = load_history_excel()
     all_txns.extend(session_transactions)
     save_history_excel(all_txns)
 
-    # last transaction
     last = session_transactions[-1]
     last_txn = {
         "date"    : last["date"],
@@ -319,7 +318,6 @@ def save_on_exit():
         "location": last["location"],
     }
 
-    # overall stats
     total_txns   = len(all_txns)
     total_amount = sum(float(t["amount"]) for t in all_txns)
     avg_amount   = round(total_amount / total_txns, 2)
@@ -342,7 +340,6 @@ def save_on_exit():
         "avg_txns_per_week" : round(total_txns / week_span, 2),
     }
 
-    # per-merchant averages
     merch_data = {}
     for t in all_txns:
         key = str(t["merchant"]).lower()
@@ -367,14 +364,11 @@ def save_on_exit():
     print(f"  -> {SUMMARY_FILE}")
 
 
-#  Main Menu 
+#  Main Menu
 
 def menu():
-    print("\n" + "=" * 40)
     print(f"   Welcome, {USER['name']}!")
-    print("   PyBank Personal Banking")
-    print("=" * 40)
-
+    
     while True:
         print("\n── Menu ──")
         print("  1. Check Balance")

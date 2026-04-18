@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import "./App.css";
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const API = "http://localhost:5000/api";
+const API = "http://127.0.0.1:5000/api";
 
 const CAT_META = {
   "Food & Dining": { emoji: "🍽️", short: "Food" },
@@ -205,7 +205,7 @@ function BalancePage({ showToast }) {
         <div style={{ fontFamily: "var(--font-display)", fontSize: 42, color: "var(--gold)" }}>
           {result !== null ? fmt(result) : "— — —"}
         </div>
-        <div style={{ fontSize: 13, color: "var(--text-dim)", marginTop: 10 }}>Ravi Kumar · Personal Account</div>
+        <div style={{ fontSize: 13, color: "var(--text-dim)", marginTop: 10 }}>Ravi Kumar · Nexus Bank Account</div>
       </div>
       <div style={{ background: "var(--surface)", border: "1px solid rgba(255,255,255,.06)", borderRadius: 12, padding: "22px 24px", maxWidth: 340 }}>
         <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 18 }}>Verify Identity</div>
@@ -269,7 +269,8 @@ function DepositPage({ onDeposit, showToast }) {
   );
 }
 
-function TransactionPage({ onTransaction, showToast }) {
+// ── TransactionPage — captures both timestamps and sends to backend ─────────
+function TransactionPage({ onTransaction, showToast, sessionStartTs }) {
   const [pin, setPin] = useState("");
   const [amount, setAmount] = useState("");
   const [merchant, setMerchant] = useState("");
@@ -278,11 +279,21 @@ function TransactionPage({ onTransaction, showToast }) {
   const [loading, setLoading] = useState(false);
 
   const doTxn = async () => {
+    const txnStartTs = Date.now();
+
     setLoading(true);
     try {
       const data = await apiFetch("/transaction", {
         method: "POST",
-        body: JSON.stringify({ pin, amount: parseFloat(amount), merchant, category, txn_type: txnType }),
+        body: JSON.stringify({
+          pin,
+          amount:           parseFloat(amount),
+          merchant,
+          category,
+          txn_type:         txnType,
+          session_start_ts: sessionStartTs.current,
+          txn_start_ts:     txnStartTs,
+        }),
       });
       onTransaction(data.transaction, data.balance);
       showToast(`Payment of ${fmt(parseFloat(amount))} sent to ${merchant}!`);
@@ -381,7 +392,7 @@ function StatsPage({ txns, showToast }) {
     setSaving(true);
     try {
       const data = await apiFetch("/save", { method: "POST", body: JSON.stringify({ transactions: txns }) });
-      showToast(`Saved! ${data.total} total transactions recorded.`);
+      showToast("Transactions saved!");
     } catch (e) { showToast(e.message, "error"); }
     finally { setSaving(false); }
   };
@@ -457,12 +468,14 @@ export default function App() {
   const [txns, setTxns] = useState([]);
   const [toast, setToastState] = useState({ msg: "", type: "success", visible: false });
 
+  const sessionStartTs = useRef(Date.now());
+
   const showToast = useCallback((msg, type = "success") => {
     setToastState({ msg, type, visible: true });
     setTimeout(() => setToastState(p => ({ ...p, visible: false })), 2800);
   }, []);
 
-  const onDeposit  = (bal) => setBalance(bal);
+  const onDeposit     = (bal) => setBalance(bal);
   const onTransaction = (txn, bal) => { setTxns(p => [...p, txn]); setBalance(bal); };
 
   const NAV = [
@@ -478,7 +491,7 @@ export default function App() {
     dashboard:   <Dashboard balance={balance} txns={txns} setPage={setPage} />,
     balance:     <BalancePage showToast={showToast} />,
     deposit:     <DepositPage onDeposit={onDeposit} showToast={showToast} />,
-    transaction: <TransactionPage onTransaction={onTransaction} showToast={showToast} />,
+    transaction: <TransactionPage onTransaction={onTransaction} showToast={showToast} sessionStartTs={sessionStartTs} />,
     history:     <HistoryPage txns={txns} />,
     stats:       <StatsPage txns={txns} showToast={showToast} />,
   };
@@ -489,7 +502,7 @@ export default function App() {
         {/* Sidebar */}
         <div style={{ width: 240, background: "var(--surface)", borderRight: "1px solid rgba(201,168,76,.12)", display: "flex", flexDirection: "column", flexShrink: 0 }}>
           <div style={{ padding: "28px 24px 20px", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
-            <div style={{ fontFamily: "var(--font-display)", fontSize: 20, color: "var(--gold)", letterSpacing: ".5px" }}>PyBank</div>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 20, color: "var(--gold)", letterSpacing: ".5px" }}>Nexus Bank</div>
             <div style={{ fontSize: 11, color: "var(--text-dim)", letterSpacing: "2px", textTransform: "uppercase", marginTop: 2 }}>Personal Banking</div>
           </div>
           <nav style={{ padding: "20px 0", flex: 1 }}>
