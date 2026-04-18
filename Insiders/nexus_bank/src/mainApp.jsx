@@ -1,6 +1,7 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import "./App.css";
 
+// ── Constants ──────────────────────────────────────────────────────────────
 const API = "http://127.0.0.1:5000/api";
 
 const CAT_META = {
@@ -17,16 +18,18 @@ const CAT_META = {
 const fmt = (n) =>
   "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// ── API helpers ────────────────────────────────────────────────────────────
 async function apiFetch(path, opts = {}) {
   const res = await fetch(`${API}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...opts,
   });
   const json = await res.json();
-  if (!res.ok) throw { status: res.status, ...json };
+  if (!res.ok) throw new Error(json.error || "Request failed");
   return json;
 }
 
+// ── Sub-components ─────────────────────────────────────────────────────────
 function Toast({ msg, type, visible }) {
   return (
     <div style={{
@@ -42,10 +45,10 @@ function Toast({ msg, type, visible }) {
   );
 }
 
-function PinInput({ value, onChange }) {
+function PinInput({ id, value, onChange }) {
   return (
     <input
-      type="password" maxLength={4} value={value}
+      id={id} type="password" maxLength={4} value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder="••••"
       style={{
@@ -63,7 +66,7 @@ function StatCard({ label, value, valueColor, sub, subColor }) {
   return (
     <div style={{
       background: "var(--surface)", border: "1px solid rgba(255,255,255,.06)",
-      borderRadius: 12, padding: "20px 22px",
+      borderRadius: 12, padding: "20px 22px", position: "relative", overflow: "hidden",
     }}>
       <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 10 }}>{label}</div>
       <div style={{ fontFamily: "var(--font-display)", fontSize: 26, color: valueColor || "var(--text)" }}>{value}</div>
@@ -118,209 +121,7 @@ function BarBreakdown({ data, maxVal }) {
   ));
 }
 
-function FraudModal({ fraudData, onDismiss, onForceLogout }) {
-  if (!fraudData) return null;
-
-  const isLogout    = fraudData.final_decision === "LOGOUT_BLOCK";
-  const probPct     = ((fraudData.fraud_probability || 0) * 100).toFixed(1);
-  const flags       = fraudData.sus_flags || {};
-  const xgb         = fraudData.xgb;
-  const accent      = isLogout ? "#e05555" : "#e09020";
-  const bg          = isLogout
-    ? "linear-gradient(135deg,#2a1111 0%,#1a0a0a 100%)"
-    : "linear-gradient(135deg,#2a1a08 0%,#1a1208 100%)";
-
-  return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,.75)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      zIndex: 1000, backdropFilter: "blur(4px)",
-    }}>
-      <div style={{
-        background: bg, border: `1px solid ${accent}55`,
-        borderRadius: 16, padding: "32px 36px", maxWidth: 500, width: "90%",
-        boxShadow: `0 0 40px ${accent}22`,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
-          <div style={{
-            width: 48, height: 48, borderRadius: 12,
-            background: `${accent}22`, display: "flex",
-            alignItems: "center", justifyContent: "center", fontSize: 24,
-          }}>
-            {isLogout ? "🔒" : "⚠️"}
-          </div>
-          <div>
-            <div style={{ fontFamily: "var(--font-display)", fontSize: 20, color: accent }}>
-              {isLogout ? "Account Locked" : "Fraud Alert"}
-            </div>
-            <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 2 }}>
-              {isLogout
-                ? "Suspicious activity detected — account locked for your protection."
-                : "High fraud probability — transaction has been blocked."}
-            </div>
-          </div>
-        </div>
-
-        <div style={{ background: "rgba(255,255,255,.04)", borderRadius: 10, padding: "16px 18px", marginBottom: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-            <span style={{ fontSize: 12, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 1 }}>Fraud Probability</span>
-            <span style={{ fontSize: 14, fontWeight: 600, color: accent }}>{probPct}%</span>
-          </div>
-          <div style={{ height: 6, background: "rgba(255,255,255,.08)", borderRadius: 3 }}>
-            <div style={{
-              height: 6, borderRadius: 3,
-              background: `linear-gradient(90deg, #e0a020, ${accent})`,
-              width: `${probPct}%`, transition: "width .6s ease",
-            }} />
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-            <span style={{ fontSize: 10, color: "var(--text-dim)" }}>0%</span>
-            <span style={{ fontSize: 10, color: "var(--text-dim)" }}>Model: {fraudData.model_used}</span>
-            <span style={{ fontSize: 10, color: "var(--text-dim)" }}>100%</span>
-          </div>
-        </div>
-
-        {Object.keys(flags).length > 0 && (
-          <div style={{ background: "rgba(255,255,255,.04)", borderRadius: 10, padding: "14px 18px", marginBottom: 16 }}>
-            <div style={{ fontSize: 12, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
-              Suspicious Flags
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              {[
-                ["⏰ Unusual Time",        flags.time_sus],
-                ["📍 Location Jump",       flags.location_sus],
-                ["💸 Unusual Amount",      flags.amount_sus],
-                ["🏪 Merchant Risk",       flags.merchant_sus],
-                ["💣 Balance Wipeout",     flags.balance_wipeout],
-                ["📊 High % of Balance",   flags.large_pct_of_balance],
-                ["⚡ Rapid Transactions",  flags.rapid_txns],
-                ["📈 Abnormal vs Average", flags.abnormal_vs_session_avg],
-              ].filter(([, val]) => val !== undefined && val !== null)
-               .map(([label, val]) => (
-                <div key={label} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: val ? accent : "var(--text-dim)" }}>
-                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: val ? accent : "rgba(255,255,255,.15)" }} />
-                  {label}
-                </div>
-              ))}
-            </div>
-            {flags.pct_of_balance !== undefined && (
-              <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-dim)" }}>
-                Attempted: <span style={{ color: accent, fontWeight: 600 }}>{flags.pct_of_balance}% of balance</span>
-                {flags.attempted_amount !== undefined && (
-                  <span> — ₹{Number(flags.attempted_amount).toLocaleString("en-IN")} of ₹{Number(flags.balance_at_check).toLocaleString("en-IN")}</span>
-                )}
-              </div>
-            )}
-            {flags.sus_score !== undefined && flags.pct_of_balance === undefined && (
-              <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-dim)" }}>
-                Suspicion Score: <span style={{ color: accent, fontWeight: 600 }}>{flags.sus_score} / 4</span>
-              </div>
-            )}
-          </div>
-        )}
-
-        {xgb && (
-          <div style={{ background: "rgba(255,255,255,.04)", borderRadius: 10, padding: "14px 18px", marginBottom: 16 }}>
-            <div style={{ fontSize: 12, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
-              XGBoost Tree Scores
-            </div>
-            {[
-              ["💰 Finance Patterns",     xgb.tree1_finance],
-              ["📍 Context Patterns",     xgb.tree2_context],
-              ["🔄 Behavioural Patterns", xgb.tree3_behavioral],
-            ].map(([label, score]) => (
-              <div key={label} style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-                <span style={{ fontSize: 12, color: "var(--text-dim)", minWidth: 170 }}>{label}</span>
-                <div style={{ flex: 1, height: 4, background: "rgba(255,255,255,.08)", borderRadius: 2, margin: "0 10px" }}>
-                  <div style={{ height: 4, background: accent, borderRadius: 2, width: `${(score * 100).toFixed(0)}%` }} />
-                </div>
-                <span style={{ fontSize: 12, color: accent, minWidth: 42, textAlign: "right" }}>
-                  {(score * 100).toFixed(1)}%
-                </span>
-              </div>
-            ))}
-            <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-dim)" }}>
-              Combined Score: <span style={{ color: accent, fontWeight: 600 }}>{xgb.sum_prob?.toFixed(4)}</span>
-              <span style={{ color: "var(--text-dim)", marginLeft: 6 }}>(threshold: 1.20)</span>
-            </div>
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
-          {isLogout ? (
-            <button onClick={onForceLogout} style={{
-              flex: 1, padding: "12px 20px", borderRadius: 8,
-              background: accent, color: "#fff", border: "none",
-              fontFamily: "var(--font-body)", fontSize: 14, fontWeight: 500, cursor: "pointer",
-            }}>
-              🔒 Lock Account & Logout
-            </button>
-          ) : (
-            <button onClick={onDismiss} style={{
-              flex: 1, padding: "12px 20px", borderRadius: 8,
-              background: "rgba(255,255,255,.06)", color: "var(--text)",
-              border: "1px solid rgba(255,255,255,.1)", fontFamily: "var(--font-body)",
-              fontSize: 14, cursor: "pointer",
-            }}>
-              Dismiss
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function LockedScreen({ onUnlock }) {
-  const [pin, setPin]     = useState("");
-  const [error, setError] = useState("");
-
-  const tryUnlock = () => {
-    if (pin === "1234") {
-      onUnlock();
-    } else {
-      setError("Incorrect PIN. Please try again.");
-      setPin("");
-    }
-  };
-
-  return (
-    <div style={{
-      position: "fixed", inset: 0,
-      background: "linear-gradient(135deg,#0d1117 0%,#1a0a0a 100%)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      zIndex: 900,
-    }}>
-      <div style={{
-        background: "var(--surface)", border: "1px solid rgba(224,85,85,.3)",
-        borderRadius: 16, padding: "40px 48px", maxWidth: 380, width: "90%", textAlign: "center",
-      }}>
-        <div style={{ fontSize: 48, marginBottom: 20 }}>🔒</div>
-        <div style={{ fontFamily: "var(--font-display)", fontSize: 22, color: "#e05555", marginBottom: 8 }}>
-          Account Locked
-        </div>
-        <p style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 28, lineHeight: 1.6 }}>
-          Your account has been locked due to suspicious transaction activity.
-          Please enter your PIN to unlock.
-        </p>
-        <label style={{ fontSize: 12, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, display: "block", textAlign: "left" }}>
-          Enter PIN to Unlock
-        </label>
-        <PinInput value={pin} onChange={setPin} />
-        {error && <p style={{ color: "#e05555", fontSize: 12, marginTop: 8 }}>{error}</p>}
-        <button onClick={tryUnlock} disabled={pin.length < 4} style={{
-          marginTop: 18, width: "100%", padding: "12px 20px", borderRadius: 8,
-          background: pin.length < 4 ? "rgba(224,85,85,.4)" : "#e05555",
-          color: "#fff", border: "none", fontFamily: "var(--font-body)",
-          fontSize: 14, fontWeight: 500, cursor: pin.length < 4 ? "default" : "pointer",
-        }}>
-          Unlock Account
-        </button>
-      </div>
-    </div>
-  );
-}
-
+// ── Page components ────────────────────────────────────────────────────────
 function Dashboard({ balance, txns, setPage }) {
   const totalSpent = txns.reduce((a, t) => a + t.amount, 0);
   const last = txns[txns.length - 1];
@@ -352,11 +153,11 @@ function Dashboard({ balance, txns, setPage }) {
           <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 18 }}>Quick Actions</div>
           {[
             ["+ Make a Payment", "transaction"],
-            ["↑ Deposit Funds",  "deposit"],
-            ["⊞ View History",   "history"],
-            ["↗ Analytics",      "stats"],
-          ].map(([label, pg]) => (
-            <button key={pg} onClick={() => setPage(pg)} style={{
+            ["↑ Deposit Funds", "deposit"],
+            ["⊞ View History", "history"],
+            ["↗ Analytics", "stats"],
+          ].map(([label, page]) => (
+            <button key={page} onClick={() => setPage(page)} style={{
               width: "100%", textAlign: "left", padding: "13px 16px", marginBottom: 8,
               borderRadius: 8, background: "transparent",
               border: "1px solid rgba(201,168,76,.3)", color: "var(--gold)",
@@ -374,7 +175,7 @@ function Dashboard({ balance, txns, setPage }) {
 }
 
 function BalancePage({ showToast }) {
-  const [pin, setPin]       = useState("");
+  const [pin, setPin] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -385,7 +186,7 @@ function BalancePage({ showToast }) {
       setResult(data.balance);
       setPin("");
       showToast("Balance revealed successfully");
-    } catch (e) { showToast(e.error || e.message || "Error", "error"); }
+    } catch (e) { showToast(e.message, "error"); }
     finally { setLoading(false); }
   };
 
@@ -424,7 +225,7 @@ function BalancePage({ showToast }) {
 }
 
 function DepositPage({ onDeposit, showToast }) {
-  const [pin, setPin]       = useState("");
+  const [pin, setPin] = useState("");
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -435,7 +236,7 @@ function DepositPage({ onDeposit, showToast }) {
       onDeposit(data.balance);
       showToast(`${fmt(parseFloat(amount))} deposited successfully!`);
       setAmount(""); setPin("");
-    } catch (e) { showToast(e.error || e.message || "Error", "error"); }
+    } catch (e) { showToast(e.message, "error"); }
     finally { setLoading(false); }
   };
 
@@ -448,8 +249,8 @@ function DepositPage({ onDeposit, showToast }) {
       <div style={{ background: "var(--surface)", border: "1px solid rgba(255,255,255,.06)", borderRadius: 12, padding: "22px 24px", maxWidth: 440 }}>
         <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 18 }}>Deposit Details</div>
         {[
-          ["Amount (₹)", "number",   amount, setAmount, "Enter amount", 14],
-          ["PIN",        "password", pin,    setPin,    "••••",         18],
+          ["Amount (₹)", "number", amount, setAmount, "Enter amount", 14],
+          ["PIN", "password", pin, setPin, "••••", 18],
         ].map(([label, type, val, setter, ph, fs]) => (
           <div key={label} style={{ marginBottom: 16 }}>
             <label style={{ fontSize: 12, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, display: "block" }}>{label}</label>
@@ -468,13 +269,13 @@ function DepositPage({ onDeposit, showToast }) {
   );
 }
 
-function TransactionPage({ onTransaction, showToast, sessionStartTs, onFraudDetected }) {
-  const [pin, setPin]           = useState("");
-  const [amount, setAmount]     = useState("");
+function TransactionPage({ onTransaction, showToast, sessionStartTs }) {
+  const [pin, setPin] = useState("");
+  const [amount, setAmount] = useState("");
   const [merchant, setMerchant] = useState("");
   const [category, setCategory] = useState("Food & Dining");
-  const [txnType, setTxnType]   = useState("Card");
-  const [loading, setLoading]   = useState(false);
+  const [txnType, setTxnType] = useState("Card");
+  const [loading, setLoading] = useState(false);
 
   const doTxn = async () => {
     const txnStartTs = Date.now();
@@ -493,19 +294,10 @@ function TransactionPage({ onTransaction, showToast, sessionStartTs, onFraudDete
         }),
       });
       onTransaction(data.transaction, data.balance);
-      const fr = data.fraud_result;
-      const pct = ((fr?.fraud_probability || 0) * 100).toFixed(1);
-      showToast(`✅ Payment sent · Risk: ${pct}% (${fr?.model_used})`);
+      showToast(`Payment of ${fmt(parseFloat(amount))} sent to ${merchant}!`);
       setAmount(""); setMerchant(""); setPin("");
-    } catch (e) {
-      if (e.fraud_blocked) {
-        onFraudDetected(e);
-      } else {
-        showToast(e.error || e.message || "Transaction failed", "error");
-      }
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { showToast(e.message, "error"); }
+    finally { setLoading(false); }
   };
 
   return (
@@ -518,8 +310,8 @@ function TransactionPage({ onTransaction, showToast, sessionStartTs, onFraudDete
         <div style={{ background: "var(--surface)", border: "1px solid rgba(255,255,255,.06)", borderRadius: 12, padding: "22px 24px" }}>
           <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 18 }}>Payment Details</div>
           {[
-            ["Amount (₹)",             "number", amount,   setAmount,   "0.00",               14],
-            ["Merchant / Recipient",   "text",   merchant, setMerchant, "e.g. Swiggy, Amazon", 14],
+            ["Amount (₹)", "number", amount, setAmount, "0.00", 14],
+            ["Merchant / Recipient", "text", merchant, setMerchant, "e.g. Swiggy, Amazon", 14],
           ].map(([label, type, val, setter, ph, fs]) => (
             <div key={label} style={{ marginBottom: 14 }}>
               <label style={{ fontSize: 12, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, display: "block" }}>{label}</label>
@@ -549,7 +341,7 @@ function TransactionPage({ onTransaction, showToast, sessionStartTs, onFraudDete
             width: "100%", padding: "11px 22px", borderRadius: 8, background: "var(--gold)",
             color: "#0D1117", border: "none", fontFamily: "var(--font-body)",
             fontSize: 14, fontWeight: 500, cursor: "pointer",
-          }}>{loading ? "Checking security…" : "Confirm Payment"}</button>
+          }}>{loading ? "Processing…" : "Confirm Payment"}</button>
         </div>
         <div style={{ background: "var(--surface)", border: "1px solid rgba(255,255,255,.06)", borderRadius: 12, padding: "22px 24px" }}>
           <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 18 }}>Category</div>
@@ -599,7 +391,7 @@ function StatsPage({ txns, showToast }) {
     try {
       await apiFetch("/save", { method: "POST", body: JSON.stringify({ transactions: txns }) });
       showToast("Transactions saved!");
-    } catch (e) { showToast(e.error || e.message || "Error", "error"); }
+    } catch (e) { showToast(e.message, "error"); }
     finally { setSaving(false); }
   };
 
@@ -612,9 +404,9 @@ function StatsPage({ txns, showToast }) {
     </div>
   );
 
-  const total      = txns.reduce((a, t) => a + t.amount, 0);
-  const avg        = total / txns.length;
-  const catTotals  = {};
+  const total = txns.reduce((a, t) => a + t.amount, 0);
+  const avg = total / txns.length;
+  const catTotals = {};
   const merchTotals = {};
   txns.forEach(t => {
     catTotals[t.category] = (catTotals[t.category] || 0) + t.amount;
@@ -622,11 +414,11 @@ function StatsPage({ txns, showToast }) {
     if (!merchTotals[k]) merchTotals[k] = { name: t.merchant, total: 0 };
     merchTotals[k].total += t.amount;
   });
-  const catData   = Object.entries(catTotals).sort((a, b) => b[1] - a[1]);
-  const maxCat    = Math.max(...catData.map(d => d[1]));
+  const catData = Object.entries(catTotals).sort((a, b) => b[1] - a[1]);
+  const maxCat = Math.max(...catData.map(d => d[1]));
   const merchData = Object.values(merchTotals).sort((a, b) => b.total - a.total).slice(0, 6);
-  const maxMerch  = Math.max(...merchData.map(m => m.total));
-  const topCat    = catData[0]?.[0] || "—";
+  const maxMerch = Math.max(...merchData.map(m => m.total));
+  const topCat = catData[0]?.[0] || "—";
 
   return (
     <div>
@@ -642,10 +434,10 @@ function StatsPage({ txns, showToast }) {
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 20 }}>
         {[
-          ["Total Transactions",    txns.length],
-          ["Avg per Transaction",   fmt(avg)],
-          ["Total Spent",           fmt(total)],
-          ["Top Category",          topCat],
+          ["Total Transactions", txns.length],
+          ["Avg per Transaction", fmt(avg)],
+          ["Total Spent", fmt(total)],
+          ["Top Category", topCat],
         ].map(([label, val]) => (
           <div key={label} style={{ background: "var(--surface2)", borderRadius: 10, padding: 16 }}>
             <div style={{ fontFamily: "var(--font-display)", fontSize: 22, color: "var(--gold)", marginBottom: 4 }}>{val}</div>
@@ -667,13 +459,12 @@ function StatsPage({ txns, showToast }) {
   );
 }
 
+// ── App ────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [page, setPage]           = useState("dashboard");
-  const [balance, setBalance]     = useState(50000);
-  const [txns, setTxns]           = useState([]);
-  const [toast, setToastState]    = useState({ msg: "", type: "success", visible: false });
-  const [fraudData, setFraudData] = useState(null);
-  const [locked, setLocked]       = useState(false);
+  const [page, setPage] = useState("dashboard");
+  const [balance, setBalance] = useState(50000);
+  const [txns, setTxns] = useState([]);
+  const [toast, setToastState] = useState({ msg: "", type: "success", visible: false });
 
   const sessionStartTs = useRef(Date.now());
 
@@ -684,38 +475,27 @@ export default function App() {
 
   const onDeposit     = (bal) => setBalance(bal);
   const onTransaction = (txn, bal) => { setTxns(p => [...p, txn]); setBalance(bal); };
-  const onFraudDetected = useCallback((errData) => setFraudData(errData), []);
-  const dismissFraud  = () => setFraudData(null);
-  const forceLogout   = () => { setFraudData(null); setLocked(true); };
-  const onUnlock      = () => setLocked(false);
 
   const NAV = [
-    { id: "dashboard",   label: "Dashboard",      icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg> },
-    { id: "balance",     label: "Balance",         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5v7M6 6.5c0-.5.9-1.5 2-1.5s2 .7 2 1.5-2 1.5-2 1.5-2 1-2 2 .9 1.5 2 1.5 2-1 2-1.5"/></svg> },
-    { id: "deposit",     label: "Deposit",         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 2v12M3 7l5-5 5 5"/><path d="M2 14h12"/></svg> },
-    { id: "transaction", label: "New Transaction", icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 8h12M10 5l3 3-3 3"/></svg> },
-    { id: "history",     label: "History",         icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M5 3V2M11 3V2M2 7h12"/></svg> },
-    { id: "stats",       label: "Analytics",       icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 14l3-4 3 2 3-5 3 3"/></svg> },
+    { id: "dashboard",   label: "Dashboard",       icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg> },
+    { id: "balance",     label: "Balance",          icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5v7M6 6.5c0-.5.9-1.5 2-1.5s2 .7 2 1.5-2 1.5-2 1.5-2 1-2 2 .9 1.5 2 1.5 2-1 2-1.5"/></svg> },
+    { id: "deposit",     label: "Deposit",          icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 2v12M3 7l5-5 5 5"/><path d="M2 14h12"/></svg> },
+    { id: "transaction", label: "New Transaction",  icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 8h12M10 5l3 3-3 3"/></svg> },
+    { id: "history",     label: "History",          icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M5 3V2M11 3V2M2 7h12"/></svg> },
+    { id: "stats",       label: "Analytics",        icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 14l3-4 3 2 3-5 3 3"/></svg> },
   ];
 
   const PAGES = {
     dashboard:   <Dashboard balance={balance} txns={txns} setPage={setPage} />,
     balance:     <BalancePage showToast={showToast} />,
     deposit:     <DepositPage onDeposit={onDeposit} showToast={showToast} />,
-    transaction: <TransactionPage
-                   onTransaction={onTransaction}
-                   showToast={showToast}
-                   sessionStartTs={sessionStartTs}
-                   onFraudDetected={onFraudDetected}
-                 />,
+    transaction: <TransactionPage onTransaction={onTransaction} showToast={showToast} sessionStartTs={sessionStartTs} />,
     history:     <HistoryPage txns={txns} />,
     stats:       <StatsPage txns={txns} showToast={showToast} />,
   };
 
   return (
     <>
-      {locked && <LockedScreen onUnlock={onUnlock} />}
-      <FraudModal fraudData={fraudData} onDismiss={dismissFraud} onForceLogout={forceLogout} />
       <div className="app-shell">
         <div style={{ width: 240, background: "var(--surface)", borderRight: "1px solid rgba(201,168,76,.12)", display: "flex", flexDirection: "column", flexShrink: 0 }}>
           <div style={{ padding: "28px 24px 20px", borderBottom: "1px solid rgba(255,255,255,.05)" }}>
